@@ -27,6 +27,7 @@ from module.filter import Filter
 from module.get_chat_history_v2 import get_chat_history_v2
 from module.language import Language, _t
 from module.pyrogram_extension import (
+    ParallelDownloadClient,
     check_user_permission,
     get_utf16_length,
     parse_link,
@@ -36,6 +37,7 @@ from module.pyrogram_extension import (
     retry,
     set_max_concurrent_transmissions,
     set_meta_data,
+    set_single_file_download_workers,
     upload_telegram_chat_message,
 )
 from utils.format import replace_date_time, validate_title
@@ -136,7 +138,7 @@ class DownloadBot:
 
     def _create_client(self, app: Application):
         """Create the bot client using the application's transmission limit."""
-        self.bot = pyrogram.Client(
+        self.bot = ParallelDownloadClient(
             app.application_name + "_bot",
             api_hash=app.api_hash,
             api_id=app.api_id,
@@ -145,6 +147,7 @@ class DownloadBot:
             proxy=app.proxy,
         )
         set_max_concurrent_transmissions(self.bot, app.max_concurrent_transmissions)
+        set_single_file_download_workers(self.bot, app.single_file_download_workers)
 
     async def start(
         self,

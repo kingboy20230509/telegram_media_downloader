@@ -198,6 +198,12 @@ def get_download_list():
             if result != "[":
                 result += ","
             download_speed = format_byte(value["download_speed"]) + "/s"
+            if value.get("part_speeds"):
+                worker_speeds = " | ".join(
+                    f"P{worker + 1}: {format_byte(speed)}/s"
+                    for worker, speed in enumerate(value["part_speeds"])
+                )
+                download_speed += f"<br><small>{worker_speeds}</small>"
             result += (
                 '{ "chat":"'
                 + f"{chat_id}"

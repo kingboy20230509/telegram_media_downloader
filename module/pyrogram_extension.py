@@ -2,16 +2,18 @@
 
 import asyncio
 import html
+import inspect
+import math
 import os
 import secrets
 import struct
 import time
 from copy import deepcopy
 from datetime import datetime
-from functools import wraps
+from functools import partial, wraps
 from io import BytesIO, StringIO
 from mimetypes import MimeTypes
-from typing import Callable, Iterable, List, Optional, Tuple, Union
+from typing import AsyncGenerator, Callable, Iterable, List, Optional, Tuple, Union
 
 import pyrogram
 from loguru import logger
@@ -22,6 +24,7 @@ from pyrogram.file_id import (
     FILE_REFERENCE_FLAG,
     PHOTO_TYPES,
     WEB_LOCATION_FLAG,
+    FileId,
     FileType,
     b64_decode,
     rle_decode,
@@ -653,7 +656,9 @@ async def process_caption(
     return truncated_caption
 
 
-def convert_message_entity(client, entity: "pyrogram.raw.base.MessageEntity") -> Optional["pyrogram.types.MessageEntity"]:
+def convert_message_entity(
+    client, entity: "pyrogram.raw.base.MessageEntity"
+) -> Optional["pyrogram.types.MessageEntity"]:
     # Special case for InputMessageEntityMentionName -> MessageEntityType.TEXT_MENTION
     # This happens in case of UpdateShortSentMessage inside send_message() where entities are parsed from the input
     if isinstance(entity, pyrogram.raw.types.InputMessageEntityMentionName):
@@ -672,8 +677,9 @@ def convert_message_entity(client, entity: "pyrogram.raw.base.MessageEntity") ->
         language=getattr(entity, "language", None),
         custom_emoji_id=getattr(entity, "document_id", None),
         expandable=getattr(entity, "collapsed", None),
-        client=client
+        client=client,
     )
+
 
 def convert_entities(
     entities: List[pyrogram.raw.base.MessageEntity],
@@ -683,9 +689,7 @@ def convert_entities(
         return []
 
     try:
-        return [
-            convert_message_entity(None, entity) for entity in entities
-        ]
+        return [convert_message_entity(None, entity) for entity in entities]
     except Exception as e:
         logger.warning(f"Failed to convert entities: {e}")
         return []
@@ -1124,11 +1128,19 @@ async def _report_bot_status(
                     os.path.basename(value["file_name"]), 10
                 )
                 progress = int(value["down_byte"] / value["total_size"] * 100)
+                part_speed_str = ""
+                if value.get("part_speeds"):
+                    worker_speeds = " | ".join(
+                        f"P{worker + 1}: {format_byte(speed)}/s"
+                        for worker, speed in enumerate(value["part_speeds"])
+                    )
+                    part_speed_str = f" │   ├─ 🧩 : {worker_speeds}\n"
                 download_result_str += (
                     f" ├─ 🆔 {_t('Message ID')}: {idx}\n"
                     f" │   ├─ 📁 : {temp_file_name}\n"
                     f" │   ├─ 📏 : {format_byte(value['total_size'])}\n"
                     f" │   ├─ ⏬ : {format_byte(value['download_speed'])}/s\n"
+                    f"{part_speed_str}"
                     f" │   └─ 📊 : [{create_progress_bar(progress)}]"
                     f" ({progress}%)\n"
                 )
@@ -1193,6 +1205,14 @@ def set_max_concurrent_transmissions(
         client.get_file_semaphore = asyncio.Semaphore(
             client.max_concurrent_transmissions
         )
+
+
+def set_single_file_download_workers(
+    client: pyrogram.Client, single_file_download_workers: int
+):
+    """Set the number of ordered range workers used for each downloaded file."""
+    if hasattr(client, "single_file_download_workers"):
+        client.single_file_download_workers = max(1, int(single_file_download_workers))
 
 
 async def fetch_message(client: pyrogram.Client, message: pyrogram.types.Message):
@@ -1436,8 +1456,131 @@ class HookSession(pyrogram.session.Session):
         self.START_TIMEOUT = start_timeout
 
 
+class ParallelDownloadClient(pyrogram.Client):
+    """Pyrogram client with ordered, parallel range downloads per file."""
+
+    DOWNLOAD_CHUNK_SIZE = 1024 * 1024
+
+    def __init__(self, name: str, **kwargs):
+        self.single_file_download_workers = max(
+            1, int(kwargs.pop("single_file_download_workers", 1))
+        )
+        super().__init__(name, **kwargs)
+
+    async def _get_file_part(self, file_id: FileId, file_size: int, part: int):
+        started_at = self.loop.time()
+        chunks = []
+        async for chunk in pyrogram.Client.get_file(
+            self,
+            file_id,
+            file_size=file_size,
+            limit=1,
+            offset=part,
+        ):
+            chunks.append(chunk)
+        return b"".join(chunks), max(self.loop.time() - started_at, 0.001)
+
+    async def get_file(
+        self,
+        file_id: FileId,
+        file_size: int = 0,
+        limit: int = 0,
+        offset: int = 0,
+        progress: Callable = None,
+        progress_args: tuple = (),
+    ) -> AsyncGenerator[bytes, None]:
+        """Download independent file ranges concurrently and yield them in order."""
+        start_part = abs(offset)
+        total_parts = math.ceil(file_size / self.DOWNLOAD_CHUNK_SIZE)
+        requested_parts = abs(limit) or max(total_parts - start_part, 0)
+        part_count = min(requested_parts, max(total_parts - start_part, 0))
+        worker_count = min(self.single_file_download_workers, part_count)
+
+        if worker_count <= 1 or file_size <= 0:
+            async for chunk in pyrogram.Client.get_file(
+                self,
+                file_id,
+                file_size=file_size,
+                limit=limit,
+                offset=offset,
+                progress=progress,
+                progress_args=progress_args,
+            ):
+                yield chunk
+            return
+
+        pending = {}
+        part_speeds = [0] * worker_count
+        next_part = 0
+        progress_supports_part_speeds = False
+        if progress:
+            try:
+                progress_supports_part_speeds = (
+                    "part_speeds" in inspect.signature(progress).parameters
+                )
+            except (TypeError, ValueError):
+                pass
+
+        def schedule_part(relative_part: int):
+            worker_index = relative_part % worker_count
+
+            async def download_part():
+                chunk, elapsed = await self._get_file_part(
+                    file_id,
+                    file_size,
+                    start_part + relative_part,
+                )
+                part_speeds[worker_index] = int(len(chunk) / elapsed)
+                return chunk
+
+            pending[relative_part] = self.loop.create_task(download_part())
+
+        while next_part < worker_count:
+            schedule_part(next_part)
+            next_part += 1
+
+        try:
+            for relative_part in range(part_count):
+                chunk = await pending.pop(relative_part)
+                if not chunk:
+                    break
+
+                yield chunk
+
+                if progress:
+                    current = min(
+                        (start_part + relative_part) * self.DOWNLOAD_CHUNK_SIZE
+                        + len(chunk),
+                        file_size,
+                    )
+                    callback = partial(
+                        progress,
+                        current,
+                        file_size,
+                        *progress_args,
+                        **(
+                            {"part_speeds": tuple(part_speeds)}
+                            if progress_supports_part_speeds
+                            else {}
+                        ),
+                    )
+                    if inspect.iscoroutinefunction(progress):
+                        await callback()
+                    else:
+                        await self.loop.run_in_executor(self.executor, callback)
+
+                if next_part < part_count:
+                    schedule_part(next_part)
+                    next_part += 1
+        finally:
+            for task in pending.values():
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending.values(), return_exceptions=True)
+
+
 # pylint: disable=all
-class HookClient(pyrogram.Client):
+class HookClient(ParallelDownloadClient):
     """Hook Client"""
 
     # pylint: disable=R0901

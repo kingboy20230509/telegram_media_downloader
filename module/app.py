@@ -342,6 +342,8 @@ def get_config(config, key, default=None, val_type=str, verbose=True):
 class Application:
     """Application load config and update config."""
 
+    single_file_download_workers: int = 2
+
     def __init__(
         self,
         config_file: str,
@@ -501,6 +503,16 @@ class Application:
 
         self.max_download_task = _config.get(
             "max_download_task", self.max_download_task
+        )
+
+        self.single_file_download_workers = max(
+            1,
+            int(
+                _config.get(
+                    "single_file_download_workers",
+                    self.single_file_download_workers,
+                )
+            ),
         )
 
         self.max_concurrent_transmissions = self.max_download_task * 5

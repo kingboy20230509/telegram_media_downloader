@@ -190,6 +190,7 @@ file_name_prefix:
 - file_name
 file_name_prefix_split: ' - '
 max_download_task: 5
+single_file_download_workers: 2
 web_host: 127.0.0.1
 web_port: 5000
 language: EN
@@ -228,6 +229,7 @@ enable_download_txt: false
   - `caption` - The title of the message (may be empty)
 - **file_name_prefix_split** - Custom file name prefix symbol, the default is `-`
 - **max_download_task** - The maximum number of task download tasks, the default is 5.
+- **single_file_download_workers** - Concurrent ordered range requests for each file, default `2`. Use `2` for standard accounts and try `4` for Premium accounts. This value is also bounded by `max_concurrent_transmissions`; the web and bot speed displays show `P1`, `P2`, etc. for active workers.
 - **hide_file_name** - Whether to hide the web interface file name, default `false`
 - **web_host** - Web host
 - **web_port** - Web port

@@ -52,6 +52,7 @@ async def update_download_status(
     start_time: float,
     node: TaskNode,
     client: Client,
+    part_speeds: tuple = (),
 ):
     """update_download_status"""
     cur_time = time.time()
@@ -98,6 +99,7 @@ async def update_download_status(
         _download_result[chat_id][message_id][
             "each_second_total_download"
         ] = each_second_total_download
+        _download_result[chat_id][message_id]["part_speeds"] = part_speeds
     else:
         each_second_total_download = down_byte
         _download_result[chat_id][message_id] = {
@@ -108,6 +110,7 @@ async def update_download_status(
             "end_time": cur_time,
             "download_speed": down_byte / (cur_time - start_time),
             "each_second_total_download": each_second_total_download,
+            "part_speeds": part_speeds,
             "task_id": node.task_id,
         }
         _total_download_size += down_byte
