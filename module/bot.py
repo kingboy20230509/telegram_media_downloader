@@ -34,6 +34,7 @@ from module.pyrogram_extension import (
     report_bot_forward_status,
     report_bot_status,
     retry,
+    set_max_concurrent_transmissions,
     set_meta_data,
     upload_telegram_chat_message,
 )
@@ -133,14 +134,8 @@ class DownloadBot:
         with open("d", "w", encoding="utf-8") as yaml_file:
             self._yaml.dump(self.config, yaml_file)
 
-    async def start(
-        self,
-        app: Application,
-        client: pyrogram.Client,
-        add_download_task: Callable,
-        download_chat_task: Callable,
-    ):
-        """Start bot"""
+    def _create_client(self, app: Application):
+        """Create the bot client using the application's transmission limit."""
         self.bot = pyrogram.Client(
             app.application_name + "_bot",
             api_hash=app.api_hash,
@@ -149,6 +144,17 @@ class DownloadBot:
             workdir=app.session_file_path,
             proxy=app.proxy,
         )
+        set_max_concurrent_transmissions(self.bot, app.max_concurrent_transmissions)
+
+    async def start(
+        self,
+        app: Application,
+        client: pyrogram.Client,
+        add_download_task: Callable,
+        download_chat_task: Callable,
+    ):
+        """Start bot"""
+        self._create_client(app)
 
         # Command list
         commands = [
