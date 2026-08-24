@@ -23,6 +23,7 @@ from module.pyrogram_extension import (
     record_download_status,
     report_bot_download_status,
     set_max_concurrent_transmissions,
+    set_single_file_download_workers,
     set_meta_data,
     update_cloud_upload_stat,
     upload_telegram_chat,
@@ -663,6 +664,7 @@ def main():
         init_web(app)
 
         set_max_concurrent_transmissions(client, app.max_concurrent_transmissions)
+        set_single_file_download_workers(client, app.single_file_download_workers)
 
         app.loop.run_until_complete(start_server(client))
         logger.success(_t("Successfully started (Press Ctrl+C to stop)"))

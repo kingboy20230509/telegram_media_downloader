@@ -10,10 +10,14 @@ from module.bot import DownloadBot
 class DownloadBotTestCase(unittest.TestCase):
     """Test bot client configuration."""
 
+    @mock.patch("module.bot.set_single_file_download_workers")
     @mock.patch("module.bot.set_max_concurrent_transmissions")
-    @mock.patch("module.bot.pyrogram.Client")
+    @mock.patch("module.bot.ParallelDownloadClient")
     def test_create_client_uses_application_transmission_limit(
-        self, mock_client, mock_set_transmission_limit
+        self,
+        mock_client,
+        mock_set_transmission_limit,
+        mock_set_file_workers,
     ):
         app = Application("", "")
         app.application_name = "media_downloader"
@@ -27,6 +31,7 @@ class DownloadBotTestCase(unittest.TestCase):
             "port": 1080,
         }
         app.max_concurrent_transmissions = 25
+        app.single_file_download_workers = 4
 
         bot = DownloadBot()
         bot._create_client(app)
@@ -42,4 +47,5 @@ class DownloadBotTestCase(unittest.TestCase):
         mock_set_transmission_limit.assert_called_once_with(
             mock_client.return_value, 25
         )
+        mock_set_file_workers.assert_called_once_with(mock_client.return_value, 4)
         self.assertIs(bot.bot, mock_client.return_value)

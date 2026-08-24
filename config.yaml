@@ -22,3 +22,5 @@ media_types:
 - video_note
 # in linux please use /
 # save_path: E:\github\telegram_media_downloader
+max_download_task: 5
+single_file_download_workers: 2
