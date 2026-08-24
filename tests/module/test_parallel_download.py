@@ -16,6 +16,11 @@ class ParallelDownloadClientTestCase(unittest.IsolatedAsyncioTestCase):
         active = 0
         peak_active = 0
         progress_values = []
+        progress_part_speeds = []
+
+        def progress(current, _total, part_speeds=()):
+            progress_values.append(current)
+            progress_part_speeds.append(part_speeds)
 
         async def fake_get_file(
             _client,
@@ -49,7 +54,7 @@ class ParallelDownloadClientTestCase(unittest.IsolatedAsyncioTestCase):
                 async for chunk in client.get_file(
                     object(),
                     file_size=3 * client.DOWNLOAD_CHUNK_SIZE,
-                    progress=lambda current, _total: progress_values.append(current),
+                    progress=progress,
                 )
             ]
 
@@ -63,6 +68,8 @@ class ParallelDownloadClientTestCase(unittest.IsolatedAsyncioTestCase):
                 2 * client.DOWNLOAD_CHUNK_SIZE + 1024,
             ],
         )
+        self.assertEqual(len(progress_part_speeds[-1]), 3)
+        self.assertTrue(all(speed > 0 for speed in progress_part_speeds[-1]))
 
     async def test_get_file_falls_back_to_pyrogram_for_one_worker(self):
         calls = []

@@ -1128,11 +1128,19 @@ async def _report_bot_status(
                     os.path.basename(value["file_name"]), 10
                 )
                 progress = int(value["down_byte"] / value["total_size"] * 100)
+                part_speed_str = ""
+                if value.get("part_speeds"):
+                    worker_speeds = " | ".join(
+                        f"P{worker + 1}: {format_byte(speed)}/s"
+                        for worker, speed in enumerate(value["part_speeds"])
+                    )
+                    part_speed_str = f" │   ├─ 🧩 : {worker_speeds}\n"
                 download_result_str += (
                     f" ├─ 🆔 {_t('Message ID')}: {idx}\n"
                     f" │   ├─ 📁 : {temp_file_name}\n"
                     f" │   ├─ 📏 : {format_byte(value['total_size'])}\n"
                     f" │   ├─ ⏬ : {format_byte(value['download_speed'])}/s\n"
+                    f"{part_speed_str}"
                     f" │   └─ 📊 : [{create_progress_bar(progress)}]"
                     f" ({progress}%)\n"
                 )
@@ -1460,6 +1468,7 @@ class ParallelDownloadClient(pyrogram.Client):
         super().__init__(name, **kwargs)
 
     async def _get_file_part(self, file_id: FileId, file_size: int, part: int):
+        started_at = self.loop.time()
         chunks = []
         async for chunk in pyrogram.Client.get_file(
             self,
@@ -1469,7 +1478,7 @@ class ParallelDownloadClient(pyrogram.Client):
             offset=part,
         ):
             chunks.append(chunk)
-        return b"".join(chunks)
+        return b"".join(chunks), max(self.loop.time() - started_at, 0.001)
 
     async def get_file(
         self,
@@ -1501,16 +1510,30 @@ class ParallelDownloadClient(pyrogram.Client):
             return
 
         pending = {}
+        part_speeds = [0] * worker_count
         next_part = 0
+        progress_supports_part_speeds = False
+        if progress:
+            try:
+                progress_supports_part_speeds = (
+                    "part_speeds" in inspect.signature(progress).parameters
+                )
+            except (TypeError, ValueError):
+                pass
 
         def schedule_part(relative_part: int):
-            pending[relative_part] = self.loop.create_task(
-                self._get_file_part(
+            worker_index = relative_part % worker_count
+
+            async def download_part():
+                chunk, elapsed = await self._get_file_part(
                     file_id,
                     file_size,
                     start_part + relative_part,
                 )
-            )
+                part_speeds[worker_index] = int(len(chunk) / elapsed)
+                return chunk
+
+            pending[relative_part] = self.loop.create_task(download_part())
 
         while next_part < worker_count:
             schedule_part(next_part)
@@ -1535,6 +1558,11 @@ class ParallelDownloadClient(pyrogram.Client):
                         current,
                         file_size,
                         *progress_args,
+                        **(
+                            {"part_speeds": tuple(part_speeds)}
+                            if progress_supports_part_speeds
+                            else {}
+                        ),
                     )
                     if inspect.iscoroutinefunction(progress):
                         await callback()
