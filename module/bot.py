@@ -3,7 +3,7 @@
 import asyncio
 import os
 from datetime import datetime
-from typing import Callable, List, Union
+from typing import Callable, Dict, List, Union
 
 import pyrogram
 from loguru import logger
@@ -41,7 +41,7 @@ from module.pyrogram_extension import (
 from utils.format import replace_date_time, validate_title
 from utils.meta_data import MetaData
 
-# pylint: disable = C0301, R0902
+# pylint: disable = C0301, C0302, R0902
 
 
 class DownloadBot:
@@ -71,7 +71,7 @@ class DownloadBot:
         self.download_filter: List[str] = []
         self.task_id: int = 0
         self.reply_task = None
-        self.direct_download_nodes: dict = {}
+        self.direct_download_nodes: Dict[Union[str, int], TaskNode] = {}
         self.direct_download_lock = asyncio.Lock()
 
     def gen_task_id(self) -> int:
@@ -128,9 +128,7 @@ class DownloadBot:
             ):
                 return False
             try:
-                await self.bot.delete_messages(
-                    node.from_user_id, node.reply_message_id
-                )
+                await self.bot.delete_messages(node.from_user_id, node.reply_message_id)
             except Exception as e:
                 logger.debug(f"delete finished direct download progress error: {e}")
             self.direct_download_nodes.pop(node.from_user_id, None)
