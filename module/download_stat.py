@@ -52,6 +52,10 @@ async def update_download_status(
     start_time: float,
     node: TaskNode,
     client: Client,
+    worker_id: int = None,
+    worker_down_byte: int = None,
+    worker_total: int = None,
+    worker_count: int = None,
 ):
     """update_download_status"""
     cur_time = time.time()
@@ -111,6 +115,45 @@ async def update_download_status(
             "task_id": node.task_id,
         }
         _total_download_size += down_byte
+
+    if worker_id is not None and worker_down_byte is not None:
+        download_stat = _download_result[chat_id][message_id]
+        download_stat["worker_count"] = worker_count
+        workers = download_stat.setdefault("workers", {})
+        worker_stat = workers.get(worker_id)
+        if worker_stat:
+            last_download_byte = worker_stat["down_byte"]
+            last_time = worker_stat["end_time"]
+            download_speed = worker_stat["download_speed"]
+            each_second_total_download = worker_stat["each_second_total_download"]
+            end_time = worker_stat["end_time"]
+            each_second_total_download += worker_down_byte - last_download_byte
+
+            if cur_time - last_time >= 1.0:
+                download_speed = int(
+                    each_second_total_download / (cur_time - last_time)
+                )
+                end_time = cur_time
+                each_second_total_download = 0
+
+            worker_stat.update(
+                {
+                    "down_byte": worker_down_byte,
+                    "total_size": worker_total,
+                    "end_time": end_time,
+                    "download_speed": max(download_speed, 0),
+                    "each_second_total_download": each_second_total_download,
+                }
+            )
+        else:
+            elapsed_time = max(cur_time - start_time, 0.001)
+            workers[worker_id] = {
+                "down_byte": worker_down_byte,
+                "total_size": worker_total,
+                "end_time": cur_time,
+                "download_speed": worker_down_byte / elapsed_time,
+                "each_second_total_download": worker_down_byte,
+            }
 
     if cur_time - _last_download_time >= 1.0:
         # update speed
