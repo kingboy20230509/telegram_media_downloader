@@ -121,6 +121,11 @@ class DirectDownloadProgressTestCase(unittest.IsolatedAsyncioTestCase):
                     "total_size": 1000,
                     "file_name": "one.mp4",
                     "download_speed": 5 * 1024 * 1024,
+                    "worker_count": 6,
+                    "workers": {
+                        worker_id: {"download_speed": worker_id * 1024 * 1024}
+                        for worker_id in range(1, 7)
+                    },
                 },
                 8222: {
                     "task_id": 1,
@@ -139,6 +144,11 @@ class DirectDownloadProgressTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Total: 3", progress_message)
         self.assertIn("Waiting: 1", progress_message)
         self.assertIn("Active downloads: 2", progress_message)
+        self.assertIn("Total speed: 5.0MB/s", progress_message)
+        self.assertIn("Worker count: 6", progress_message)
+        self.assertIn("Worker speeds:", progress_message)
+        self.assertIn("Worker 1: 1.0MB/s", progress_message)
+        self.assertIn("Worker 6: 6.0MB/s", progress_message)
         self.assertIn("5.0MB/s", progress_message)
         self.assertIn("4.0MB/s", progress_message)
 

@@ -1126,14 +1126,40 @@ async def _report_bot_status(
                     os.path.basename(value["file_name"]), 10
                 )
                 progress = int(value["down_byte"] / value["total_size"] * 100)
-                download_result_str += (
+                download_detail_str = (
                     f" ├─ 🆔 {_t('Message ID')}: {idx}\n"
                     f" │   ├─ 📁 : {temp_file_name}\n"
                     f" │   ├─ 📏 : {format_byte(value['total_size'])}\n"
-                    f" │   ├─ ⏬ : {format_byte(value['download_speed'])}/s\n"
+                )
+
+                workers = value.get("workers", {})
+                worker_count = value.get("worker_count", len(workers))
+                if node.is_direct_download and worker_count:
+                    download_detail_str += (
+                        f" │   ├─ ⏬ {_t('Total speed')}: "
+                        f"{format_byte(value['download_speed'])}/s\n"
+                        f" │   ├─ 🧩 {_t('Worker count')}: {worker_count}\n"
+                        f" │   ├─ ⚡ {_t('Worker speeds')}:\n"
+                    )
+                    for worker_id in range(1, worker_count + 1):
+                        worker_speed = workers.get(worker_id, {}).get(
+                            "download_speed", 0
+                        )
+                        worker_branch = "└─" if worker_id == worker_count else "├─"
+                        download_detail_str += (
+                            f" │   │   {worker_branch} Worker {worker_id}: "
+                            f"{format_byte(worker_speed)}/s\n"
+                        )
+                else:
+                    download_detail_str += (
+                        f" │   ├─ ⏬ : {format_byte(value['download_speed'])}/s\n"
+                    )
+
+                download_detail_str += (
                     f" │   └─ 📊 : [{create_progress_bar(progress)}]"
                     f" ({progress}%)\n"
                 )
+                download_result_str += download_detail_str
 
             if download_result_str and not node.is_direct_download:
                 download_result_str = (

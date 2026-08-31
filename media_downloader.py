@@ -16,6 +16,7 @@ from module.bot import start_download_bot, stop_download_bot
 from module.download_stat import update_download_status
 from module.get_chat_history_v2 import get_chat_history_v2
 from module.language import _t
+from module.parallel_download import download_media_in_parts
 from module.pyrogram_extension import (
     HookClient,
     fetch_message,
@@ -438,18 +439,31 @@ async def download_media(
 
     for retry in range(3):
         try:
-            temp_download_path = await client.download_media(
-                message,
-                file_name=temp_file_name,
-                progress=update_download_status,
-                progress_args=(
+            if app.single_file_download_workers > 1 and media_size > 0:
+                temp_download_path = await download_media_in_parts(
+                    client,
+                    _media,
+                    temp_file_name,
+                    media_size,
+                    app.single_file_download_workers,
                     message_id,
                     ui_file_name,
                     task_start_time,
                     node,
-                    client,
-                ),
-            )
+                )
+            else:
+                temp_download_path = await client.download_media(
+                    message,
+                    file_name=temp_file_name,
+                    progress=update_download_status,
+                    progress_args=(
+                        message_id,
+                        ui_file_name,
+                        task_start_time,
+                        node,
+                        client,
+                    ),
+                )
 
             if temp_download_path and isinstance(temp_download_path, str):
                 _check_download_finish(media_size, temp_download_path, ui_file_name)
@@ -463,6 +477,7 @@ async def download_media(
             )
             await asyncio.sleep(RETRY_TIME_OUT)
             message = await fetch_message(client, message)
+            _media = getattr(message, _type, None)
             if _check_timeout(retry, message.id):
                 # pylint: disable = C0301
                 logger.error(
