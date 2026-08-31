@@ -118,7 +118,9 @@ async def _download_part(
             part_file.write(chunk)
 
     if os.path.getsize(part_path) != part.size:
-        raise IOError(f"Worker {part.worker_id} downloaded an incomplete file range")
+        raise pyrogram.errors.exceptions.bad_request_400.BadRequest(
+            f"Worker {part.worker_id} downloaded an incomplete file range"
+        )
 
 
 async def download_media_in_parts(
@@ -179,6 +181,8 @@ async def download_media_in_parts(
         raise
     except pyrogram.StopTransmission:
         return None
+    except pyrogram.errors.exceptions.bad_request_400.BadRequest:
+        raise
     except pyrogram.errors.exceptions.flood_420.FloodWait:
         raise
     except Exception as error:  # pylint: disable = W0718
