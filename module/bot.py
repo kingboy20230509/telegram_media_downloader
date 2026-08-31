@@ -118,20 +118,24 @@ class DownloadBot:
 
     async def remove_finished_direct_download_node(self, node: TaskNode):
         """Delete a completed direct-download progress message and its node."""
-        if self.direct_download_nodes.get(node.from_user_id) is not node:
+        from_user_id = node.from_user_id
+        if (
+            from_user_id is None
+            or self.direct_download_nodes.get(from_user_id) is not node
+        ):
             return None
         async with self.direct_download_lock:
             if (
-                self.direct_download_nodes.get(node.from_user_id) is not node
+                self.direct_download_nodes.get(from_user_id) is not node
                 or not node.is_running
                 or not node.is_finish()
             ):
                 return False
             try:
-                await self.bot.delete_messages(node.from_user_id, node.reply_message_id)
+                await self.bot.delete_messages(from_user_id, node.reply_message_id)
             except Exception as e:
                 logger.debug(f"delete finished direct download progress error: {e}")
-            self.direct_download_nodes.pop(node.from_user_id, None)
+            self.direct_download_nodes.pop(from_user_id, None)
             return True
 
     def stop_task(self, task_id: str):
