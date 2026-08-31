@@ -123,6 +123,7 @@ async def _download_part(
         )
 
 
+# pylint: disable = R0912, R0914
 async def download_media_in_parts(
     client: pyrogram.Client,
     media,
@@ -137,12 +138,13 @@ async def download_media_in_parts(
     """Download media concurrently and merge its ordered part files."""
     parts = build_download_parts(file_size, worker_count)
     if len(parts) <= 1:
-        return await client.download_media(
+        download_result = await client.download_media(
             media,
             file_name=file_name,
             progress=update_download_status,
             progress_args=(message_id, ui_file_name, start_time, node, client),
         )
+        return download_result if isinstance(download_result, str) else None
 
     target_path = os.path.abspath(file_name)
     temp_path = f"{target_path}.temp"
@@ -185,7 +187,7 @@ async def download_media_in_parts(
         raise
     except pyrogram.errors.exceptions.flood_420.FloodWait:
         raise
-    except Exception as error:  # pylint: disable = W0718
+    except Exception as error:  # pylint: disable = W0703
         logger.exception(f"parallel media download failed: {error}")
         return None
     finally:
