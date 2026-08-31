@@ -105,6 +105,7 @@ class DownloadBot:
                     bot=self.bot,
                     task_id=self.gen_task_id(),
                 )
+                node.is_direct_download = True
                 self.add_task_node(node)
                 self.direct_download_nodes[from_user_id] = node
 
