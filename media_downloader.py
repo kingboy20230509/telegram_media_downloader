@@ -343,6 +343,7 @@ async def download_task(
         node,
         download_status,
         file_size,
+        message.id,
     )
 
 
