@@ -60,6 +60,36 @@ class AppTestCase(unittest.TestCase):
             app.app_data["chat"][0]["ids_to_retry"],
         )
 
+    def test_single_file_download_workers_config(self):
+        app = Application("", "")
+        app.assign_config(
+            {
+                "api_id": 123,
+                "api_hash": "hash",
+                "media_types": [],
+                "file_formats": {},
+                "max_download_task": 2,
+                "single_file_download_workers": 6,
+            }
+        )
+
+        self.assertEqual(6, app.single_file_download_workers)
+        self.assertEqual(12, app.max_concurrent_transmissions)
+
+    def test_single_file_download_workers_defaults_to_one(self):
+        app = Application("", "")
+        app.assign_config(
+            {
+                "api_id": 123,
+                "api_hash": "hash",
+                "media_types": [],
+                "file_formats": {},
+            }
+        )
+
+        self.assertEqual(1, app.single_file_download_workers)
+        self.assertEqual(25, app.max_concurrent_transmissions)
+
     @mock.patch("__main__.__builtins__.open", new_callable=mock.mock_open)
     @mock.patch("module.app.yaml", autospec=True)
     def test_update_config(self, mock_yaml, mock_open):
