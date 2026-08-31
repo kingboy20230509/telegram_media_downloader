@@ -175,6 +175,7 @@ class TaskNode:
         self.topic_id = topic_id
         self.reply_to_message = None
         self.cloud_drive_upload_stat_dict: dict = {}
+        self.is_direct_download = False
 
     def skip_msg_id(self, msg_id: int):
         """Skip if message id out of range"""

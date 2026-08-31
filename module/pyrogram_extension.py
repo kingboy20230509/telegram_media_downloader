@@ -1112,6 +1112,7 @@ async def _report_bot_status(
             )
 
         download_result_str = ""
+        active_download_count = 0
         download_result = get_download_result()
         if node.chat_id in download_result:
             messages = download_result[node.chat_id]
@@ -1120,6 +1121,7 @@ async def _report_bot_status(
                 if task_id != node.task_id or value["down_byte"] == value["total_size"]:
                     continue
 
+                active_download_count += 1
                 temp_file_name = truncate_filename(
                     os.path.basename(value["file_name"]), 10
                 )
@@ -1133,10 +1135,23 @@ async def _report_bot_status(
                     f" ({progress}%)\n"
                 )
 
-            if download_result_str:
+            if download_result_str and not node.is_direct_download:
                 download_result_str = (
                     f"\n📥 {_t('Download Progresses')}:\n" + download_result_str
                 )
+
+        if node.is_direct_download:
+            waiting_download_count = max(
+                node.total_task - node.total_download_task - active_download_count,
+                0,
+            )
+            download_result_str = (
+                f"📥 {_t('Download Progresses')}:\n"
+                f"├─ 📁 {_t('Total')}: {node.total_task}\n"
+                f"├─ ⏳ {_t('Waiting')}: {waiting_download_count}\n"
+                f"└─ ⏬ {_t('Active downloads')}: {active_download_count}\n"
+                f"{download_result_str}"
+            )
 
         upload_result_str = ""
         for idx, value in node.upload_stat_dict.items():
@@ -1157,19 +1172,22 @@ async def _report_bot_status(
         if upload_result_str:
             upload_result_str = f"\n📤 {_t('Upload Progresses')}:\n" + upload_result_str
 
-        new_msg_str = (
-            f"`\n"
-            f"🆔 task id: {node.task_id}\n"
-            f"📥 {_t('Downloading')}: {format_byte(node.total_download_byte)}\n"
-            f"├─ 📁 {_t('Total')}: {node.total_download_task}\n"
-            f"├─ ✅ {_t('Success')}: {node.success_download_task}\n"
-            f"├─ ❌ {_t('Failed')}: {node.failed_download_task}\n"
-            f"└─ ⏩ {_t('Skipped')}: {node.skip_download_task}\n"
-            f"{node.forward_msg_detail_str}"
-            f"{upload_msg_detail_str}"
-            f"{upload_result_str}"
-            f"{download_result_str}\n`"
-        )
+        if node.is_direct_download:
+            new_msg_str = f"`\n{download_result_str}\n`"
+        else:
+            new_msg_str = (
+                f"`\n"
+                f"🆔 task id: {node.task_id}\n"
+                f"📥 {_t('Downloading')}: {format_byte(node.total_download_byte)}\n"
+                f"├─ 📁 {_t('Total')}: {node.total_download_task}\n"
+                f"├─ ✅ {_t('Success')}: {node.success_download_task}\n"
+                f"├─ ❌ {_t('Failed')}: {node.failed_download_task}\n"
+                f"└─ ⏩ {_t('Skipped')}: {node.skip_download_task}\n"
+                f"{node.forward_msg_detail_str}"
+                f"{upload_msg_detail_str}"
+                f"{upload_result_str}"
+                f"{download_result_str}\n`"
+            )
 
         if new_msg_str != node.last_edit_msg:
             node.last_edit_msg = new_msg_str
