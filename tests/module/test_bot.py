@@ -98,9 +98,7 @@ class DirectDownloadProgressTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(99, bot.direct_download_nodes)
 
     def test_direct_download_candidate_accepts_allowed_media_format(self):
-        app = SimpleNamespace(
-            media_types=["video"], file_formats={"video": ["mp4"]}
-        )
+        app = SimpleNamespace(media_types=["video"], file_formats={"video": ["mp4"]})
         message = SimpleNamespace(
             media=SimpleNamespace(value="video"),
             video=SimpleNamespace(mime_type="video/mp4"),
