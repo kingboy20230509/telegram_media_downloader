@@ -1,3 +1,4 @@
+/opt/homebrew/Library/Homebrew/cmd/shellenv.sh: line 27: /bin/ps: Operation not permitted
 """Bot for media downloader"""
 
 import asyncio
@@ -71,6 +72,8 @@ class DownloadBot:
         self.download_filter: List[str] = []
         self.task_id: int = 0
         self.reply_task = None
+        self.direct_download_nodes: dict = {}
+        self.direct_download_lock = asyncio.Lock()
 
     def gen_task_id(self) -> int:
         """Gen task id"""
@@ -84,6 +87,55 @@ class DownloadBot:
     def remove_task_node(self, task_id: int):
         """Remove task node"""
         self.task_node.pop(task_id)
+
+    async def get_direct_download_node(
+        self, chat_id: Union[str, int], from_user_id: Union[str, int]
+    ) -> TaskNode:
+        """Get the shared progress node for directly forwarded media."""
+        async with self.direct_download_lock:
+            node = self.direct_download_nodes.get(from_user_id)
+            if node:
+                try:
+                    await self.bot.delete_messages(from_user_id, node.reply_message_id)
+                except Exception as e:
+                    logger.debug(f"delete direct download progress error: {e}")
+            else:
+                node = TaskNode(
+                    chat_id=chat_id,
+                    from_user_id=from_user_id,
+                    bot=self.bot,
+                    task_id=self.gen_task_id(),
+                )
+                self.add_task_node(node)
+                self.direct_download_nodes[from_user_id] = node
+
+            progress_message = await self.bot.send_message(
+                from_user_id, f"📥 {_t('Downloading')}..."
+            )
+            node.reply_message_id = progress_message.id
+            node.last_edit_msg = ""
+            node.is_running = False
+            return node
+
+    async def remove_finished_direct_download_node(self, node: TaskNode):
+        """Delete a completed direct-download progress message and its node."""
+        if self.direct_download_nodes.get(node.from_user_id) is not node:
+            return None
+        async with self.direct_download_lock:
+            if (
+                self.direct_download_nodes.get(node.from_user_id) is not node
+                or not node.is_running
+                or not node.is_finish()
+            ):
+                return False
+            try:
+                await self.bot.delete_messages(
+                    node.from_user_id, node.reply_message_id
+                )
+            except Exception as e:
+                logger.debug(f"delete finished direct download progress error: {e}")
+            self.direct_download_nodes.pop(node.from_user_id, None)
+            return True
 
     def stop_task(self, task_id: str):
         """Stop task"""
@@ -107,6 +159,11 @@ class DownloadBot:
 
             for key, value in self.task_node.copy().items():
                 if value.is_running and value.is_finish():
+                    cleanup_result = await self.remove_finished_direct_download_node(
+                        value
+                    )
+                    if cleanup_result is False:
+                        continue
                     self.remove_task_node(key)
             await asyncio.sleep(3)
 
@@ -816,23 +873,29 @@ async def direct_download(
     """Direct Download"""
 
     replay_message = "Direct download..."
-    last_reply_message = await download_bot.bot.send_message(
-        message.from_user.id, replay_message, reply_to_message_id=message.id
-    )
-
-    node = TaskNode(
-        chat_id=chat_id,
-        from_user_id=message.from_user.id,
-        reply_message_id=last_reply_message.id,
-        replay_message=replay_message,
-        limit=1,
-        bot=download_bot.bot,
-        task_id=_bot.gen_task_id(),
-    )
+    if client:
+        await download_bot.bot.send_message(
+            message.from_user.id, replay_message, reply_to_message_id=message.id
+        )
+        node = await download_bot.get_direct_download_node(
+            chat_id, message.from_user.id
+        )
+    else:
+        last_reply_message = await download_bot.bot.send_message(
+            message.from_user.id, replay_message, reply_to_message_id=message.id
+        )
+        node = TaskNode(
+            chat_id=chat_id,
+            from_user_id=message.from_user.id,
+            reply_message_id=last_reply_message.id,
+            replay_message=replay_message,
+            limit=1,
+            bot=download_bot.bot,
+            task_id=_bot.gen_task_id(),
+        )
+        _bot.add_task_node(node)
 
     node.client = client
-
-    _bot.add_task_node(node)
 
     await _bot.add_download_task(
         download_message,
@@ -840,6 +903,26 @@ async def direct_download(
     )
 
     node.is_running = True
+
+
+def is_direct_download_candidate(
+    app: Application, message: pyrogram.types.Message
+) -> bool:
+    """Return whether a directly sent media message matches download settings."""
+    media_type = getattr(getattr(message, "media", None), "value", None)
+    if not media_type or media_type not in app.media_types:
+        return False
+
+    if media_type not in {"audio", "document", "video"}:
+        return True
+
+    media = getattr(message, media_type, None)
+    mime_type = getattr(media, "mime_type", "")
+    file_format = mime_type.split("/")[-1] if mime_type else None
+    allowed_formats = app.file_formats.get(media_type, [])
+    return bool(allowed_formats) and (
+        allowed_formats[0] == "all" or file_format in allowed_formats
+    )
 
 
 async def download_forward_media(
@@ -856,15 +939,9 @@ async def download_forward_media(
         None
     """
 
-    if message.media and getattr(message, message.media.value):
+    if is_direct_download_candidate(_bot.app, message):
         await direct_download(_bot, message.from_user.id, message, message, client)
         return
-
-    await client.send_message(
-        message.from_user.id,
-        f"1. {_t('Direct download, directly forward the message to your robot')}\n\n",
-        parse_mode=pyrogram.enums.ParseMode.HTML,
-    )
 
 
 async def download_from_link(client: pyrogram.Client, message: pyrogram.types.Message):
