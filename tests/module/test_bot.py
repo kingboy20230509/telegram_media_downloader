@@ -5,9 +5,9 @@ from types import SimpleNamespace
 from unittest import mock
 from unittest.mock import AsyncMock
 
-from module.app import Application, TaskNode
-from module.bot import DownloadBot, is_direct_download_candidate
-from module.pyrogram_extension import _report_bot_status
+from module.app import Application, DownloadStatus, TaskNode
+from module.bot import DownloadBot, direct_download, is_direct_download_candidate
+from module.pyrogram_extension import _report_bot_status, report_bot_download_status
 
 
 class DownloadBotTestCase(unittest.TestCase):
@@ -78,6 +78,41 @@ class DirectDownloadProgressTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(second_node.is_running)
         bot.bot.delete_messages.assert_awaited_once_with(99, 101)
         self.assertEqual(len(bot.task_node), 1)
+
+    @mock.patch("module.bot._bot")
+    async def test_direct_download_tracks_the_corresponding_reply(
+        self, mock_global_bot
+    ):
+        bot = DownloadBot()
+        bot.bot = SimpleNamespace(
+            send_message=AsyncMock(return_value=SimpleNamespace(id=201))
+        )
+        node = TaskNode(chat_id=99, from_user_id=99, task_id=1)
+        bot.get_direct_download_node = AsyncMock(return_value=node)
+        mock_global_bot.add_download_task = AsyncMock()
+        message = SimpleNamespace(id=8224, from_user=SimpleNamespace(id=99))
+
+        await direct_download(bot, 99, message, message, client=object())
+
+        self.assertEqual({8224: 201}, node.direct_download_reply_ids)
+
+    @mock.patch("module.pyrogram_extension._t", return_value="完成")
+    async def test_successful_download_replaces_direct_reply_with_completed(
+        self, _mock_translate
+    ):
+        client = SimpleNamespace(edit_message_text=AsyncMock())
+        node = TaskNode(chat_id=99, from_user_id=99, task_id=1)
+        node.direct_download_reply_ids[8224] = 201
+
+        await report_bot_download_status(
+            client,
+            node,
+            DownloadStatus.SuccessDownload,
+            message_id=8224,
+        )
+
+        client.edit_message_text.assert_awaited_once_with(99, 201, "完成")
+        self.assertNotIn(8224, node.direct_download_reply_ids)
 
     async def test_finished_download_removes_progress_and_shared_node(self):
         bot = DownloadBot()

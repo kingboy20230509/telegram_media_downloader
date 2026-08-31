@@ -1010,6 +1010,7 @@ async def report_bot_download_status(
     node: TaskNode,
     download_status: DownloadStatus,
     download_size: int = 0,
+    message_id: int = None,
 ):
     """
     Sends a message with the current status of the download bot.
@@ -1024,6 +1025,21 @@ async def report_bot_download_status(
     """
     node.stat(download_status)
     node.total_download_byte += download_size
+
+    direct_reply_message_id = node.direct_download_reply_ids.pop(message_id, None)
+    if (
+        direct_reply_message_id
+        and download_status is DownloadStatus.SuccessDownload
+    ):
+        try:
+            await client.edit_message_text(
+                node.from_user_id,
+                direct_reply_message_id,
+                _t("Completed"),
+            )
+        except Exception as error:
+            logger.debug(f"edit direct download completion error: {error}")
+
     await report_bot_status(client, node)
 
 

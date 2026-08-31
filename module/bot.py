@@ -876,12 +876,13 @@ async def direct_download(
 
     replay_message = "Direct download..."
     if client:
-        await download_bot.bot.send_message(
+        last_reply_message = await download_bot.bot.send_message(
             message.from_user.id, replay_message, reply_to_message_id=message.id
         )
         node = await download_bot.get_direct_download_node(
             chat_id, message.from_user.id
         )
+        node.direct_download_reply_ids[download_message.id] = last_reply_message.id
     else:
         last_reply_message = await download_bot.bot.send_message(
             message.from_user.id, replay_message, reply_to_message_id=message.id
