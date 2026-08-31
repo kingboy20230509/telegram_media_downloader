@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 
 from module.app import Application, TaskNode
 from module.bot import DownloadBot, is_direct_download_candidate
+from module.pyrogram_extension import _report_bot_status
 
 
 class DownloadBotTestCase(unittest.TestCase):
@@ -96,6 +97,50 @@ class DirectDownloadProgressTestCase(unittest.IsolatedAsyncioTestCase):
 
         bot.bot.delete_messages.assert_awaited_once_with(99, 101)
         self.assertNotIn(99, bot.direct_download_nodes)
+
+    @mock.patch("module.pyrogram_extension.get_download_result")
+    async def test_progress_shows_total_waiting_and_each_active_speed(
+        self, mock_download_result
+    ):
+        client = SimpleNamespace(edit_message_text=AsyncMock())
+        node = TaskNode(
+            chat_id=99,
+            from_user_id=99,
+            reply_message_id=101,
+            bot=object(),
+            task_id=1,
+        )
+        node.is_direct_download = True
+        node.total_task = 3
+        node.is_running = True
+        mock_download_result.return_value = {
+            99: {
+                8224: {
+                    "task_id": 1,
+                    "down_byte": 120,
+                    "total_size": 1000,
+                    "file_name": "one.mp4",
+                    "download_speed": 5 * 1024 * 1024,
+                },
+                8222: {
+                    "task_id": 1,
+                    "down_byte": 100,
+                    "total_size": 1000,
+                    "file_name": "two.mp4",
+                    "download_speed": 4 * 1024 * 1024,
+                },
+            }
+        }
+
+        await _report_bot_status(client, node, immediate_reply=True)
+
+        progress_message = client.edit_message_text.await_args.args[2]
+        self.assertNotIn("task id", progress_message)
+        self.assertIn("Total: 3", progress_message)
+        self.assertIn("Waiting: 1", progress_message)
+        self.assertIn("Active downloads: 2", progress_message)
+        self.assertIn("5.0MB/s", progress_message)
+        self.assertIn("4.0MB/s", progress_message)
 
     def test_direct_download_candidate_accepts_allowed_media_format(self):
         app = SimpleNamespace(media_types=["video"], file_formats={"video": ["mp4"]})
