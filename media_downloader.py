@@ -477,6 +477,7 @@ async def download_media(
             )
             await asyncio.sleep(RETRY_TIME_OUT)
             message = await fetch_message(client, message)
+            _media = getattr(message, _type, None)
             if _check_timeout(retry, message.id):
                 # pylint: disable = C0301
                 logger.error(
