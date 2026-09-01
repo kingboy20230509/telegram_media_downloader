@@ -44,7 +44,7 @@ def set_download_state(state: DownloadState):
     _download_state = state
 
 
-async def update_download_status(
+async def update_download_status(  # pylint: disable=R0913,R0914,R0915
     down_byte: int,
     total_size: int,
     message_id: int,
