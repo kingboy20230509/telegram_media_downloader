@@ -7,7 +7,12 @@ from unittest import mock
 from unittest.mock import AsyncMock
 
 from module.app import Application, DownloadStatus, TaskNode
-from module.bot import DownloadBot, direct_download, is_direct_download_candidate
+from module.bot import (
+    DownloadBot,
+    direct_download,
+    download_forward_media,
+    is_direct_download_candidate,
+)
 from module.pyrogram_extension import _report_bot_status, report_bot_download_status
 
 
@@ -60,6 +65,31 @@ class DownloadBotTestCase(unittest.TestCase):
 
 class DirectDownloadProgressTestCase(unittest.IsolatedAsyncioTestCase):
     """Test aggregated progress messages for directly forwarded media."""
+
+    @mock.patch("module.bot._t", return_value="跳过")
+    @mock.patch("module.bot._bot")
+    async def test_disabled_forward_replies_with_skipped(
+        self, mock_bot, _mock_translate
+    ):
+        mock_bot.app = SimpleNamespace(
+            media_types=["video"], file_formats={"video": ["all"]}
+        )
+        client = SimpleNamespace(send_message=AsyncMock())
+        message = SimpleNamespace(
+            id=8224,
+            from_user=SimpleNamespace(id=99),
+            media=SimpleNamespace(value="photo"),
+            photo=SimpleNamespace(),
+        )
+
+        await download_forward_media(client, message)
+
+        client.send_message.assert_awaited_once_with(
+            99,
+            "跳过",
+            reply_to_message_id=8224,
+        )
+        mock_bot.add_download_task.assert_not_called()
 
     async def test_new_download_recreates_shared_progress_at_bottom(self):
         bot = DownloadBot()
