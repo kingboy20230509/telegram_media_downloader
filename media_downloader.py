@@ -1,3 +1,4 @@
+/opt/homebrew/Library/Homebrew/cmd/shellenv.sh: line 27: /bin/ps: Operation not permitted
 """Downloads media from telegram."""
 import asyncio
 import logging
@@ -416,6 +417,7 @@ async def download_media(
     task_start_time: float = time.time()
     media_size = 0
     _media = None
+    _type = ""
     message = await fetch_message(client, message)
     try:
         for _type in media_types:
