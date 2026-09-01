@@ -23,8 +23,9 @@ class ParallelDownloadError(Exception):
 
     code = "PARALLEL_DOWNLOAD_ERROR"
 
-    def user_message(self, _global_worker_limit: int) -> str:
+    def user_message(self, global_worker_limit: int) -> str:
         """Return a concise user-facing diagnostic."""
+        del global_worker_limit
         return f"[{self.code}] {self}"
 
 
