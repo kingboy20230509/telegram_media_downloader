@@ -1,3 +1,4 @@
+/opt/homebrew/Library/Homebrew/cmd/shellenv.sh: line 27: /bin/ps: Operation not permitted
 """Pyrogram ext"""
 
 import asyncio
@@ -653,7 +654,9 @@ async def process_caption(
     return truncated_caption
 
 
-def convert_message_entity(client, entity: "pyrogram.raw.base.MessageEntity") -> Optional["pyrogram.types.MessageEntity"]:
+def convert_message_entity(
+    client, entity: "pyrogram.raw.base.MessageEntity"
+) -> Optional["pyrogram.types.MessageEntity"]:
     # Special case for InputMessageEntityMentionName -> MessageEntityType.TEXT_MENTION
     # This happens in case of UpdateShortSentMessage inside send_message() where entities are parsed from the input
     if isinstance(entity, pyrogram.raw.types.InputMessageEntityMentionName):
@@ -672,8 +675,9 @@ def convert_message_entity(client, entity: "pyrogram.raw.base.MessageEntity") ->
         language=getattr(entity, "language", None),
         custom_emoji_id=getattr(entity, "document_id", None),
         expandable=getattr(entity, "collapsed", None),
-        client=client
+        client=client,
     )
+
 
 def convert_entities(
     entities: List[pyrogram.raw.base.MessageEntity],
@@ -683,9 +687,7 @@ def convert_entities(
         return []
 
     try:
-        return [
-            convert_message_entity(None, entity) for entity in entities
-        ]
+        return [convert_message_entity(None, entity) for entity in entities]
     except Exception as e:
         logger.warning(f"Failed to convert entities: {e}")
         return []
@@ -1182,8 +1184,7 @@ async def _report_bot_status(
                     )
 
                 download_detail_str += (
-                    f" │   └─ 📊 : [{create_progress_bar(progress)}]"
-                    f" ({progress}%)\n"
+                    f" │   └─ 📊 : [{create_progress_bar(progress)}]" f" ({progress}%)\n"
                 )
                 download_result_str += download_detail_str
 
