@@ -1,3 +1,4 @@
+/opt/homebrew/Library/Homebrew/cmd/shellenv.sh: line 27: /bin/ps: Operation not permitted
 """Download one Telegram media file with multiple ranged workers."""
 
 import asyncio
@@ -23,7 +24,7 @@ class ParallelDownloadError(Exception):
 
     code = "PARALLEL_DOWNLOAD_ERROR"
 
-    def user_message(self, global_worker_limit: int) -> str:
+    def user_message(self, _global_worker_limit: int) -> str:
         """Return a concise user-facing diagnostic."""
         return f"[{self.code}] {self}"
 
