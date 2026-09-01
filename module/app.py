@@ -1,3 +1,4 @@
+/opt/homebrew/Library/Homebrew/cmd/shellenv.sh: line 27: /bin/ps: Operation not permitted
 """Application module"""
 
 import asyncio
@@ -346,7 +347,7 @@ def get_config(config, key, default=None, val_type=str, verbose=True):
 class Application:
     """Application load config and update config."""
 
-    def __init__(
+    def __init__(  # pylint: disable=too-many-statements
         self,
         config_file: str,
         app_data_file: str,
