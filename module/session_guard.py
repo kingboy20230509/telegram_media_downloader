@@ -1,3 +1,4 @@
+/opt/homebrew/Library/Homebrew/cmd/shellenv.sh: line 27: /bin/ps: Operation not permitted
 """Coalesce concurrent Pyrogram session restart requests."""
 
 import asyncio
@@ -11,11 +12,13 @@ from loguru import logger
 
 @dataclass
 class _RestartState:
+    """Track restart synchronization state for one Pyrogram session."""
+
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     generation: int = 0
 
 
-_restart_states = WeakKeyDictionary()
+_restart_states: "WeakKeyDictionary[object, _RestartState]" = WeakKeyDictionary()
 
 
 async def _restart_once(
