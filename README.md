@@ -190,6 +190,8 @@ file_name_prefix:
 - file_name
 file_name_prefix_split: ' - '
 max_download_task: 5
+single_file_download_workers: 3
+max_total_download_workers: 6
 web_host: 127.0.0.1
 web_port: 5000
 language: EN
@@ -228,6 +230,8 @@ enable_download_txt: false
   - `caption` - The title of the message (may be empty)
 - **file_name_prefix_split** - Custom file name prefix symbol, the default is `-`
 - **max_download_task** - The maximum number of task download tasks, the default is 5.
+- **single_file_download_workers** - Maximum ranged workers used by one file. Defaults to 1.
+- **max_total_download_workers** - Maximum active ranged workers shared by all files. It defaults to the larger of `max_download_task` and `single_file_download_workers`; 6 to 8 is recommended to avoid excessive concurrent requests.
 - **hide_file_name** - Whether to hide the web interface file name, default `false`
 - **web_host** - Web host
 - **web_port** - Web port
