@@ -169,6 +169,7 @@ class TaskNode:
         self.is_stop_transmission = False
         self.media_group_ids: dict = {}
         self.media_group_ids_lock: Lock = Lock()
+        self.progress_message_lock: Lock = Lock()
         self.download_status: dict = {}
         self.upload_status: dict = {}
         self.upload_stat_dict: dict = {}
@@ -177,6 +178,7 @@ class TaskNode:
         self.cloud_drive_upload_stat_dict: dict = {}
         self.is_direct_download = False
         self.direct_download_reply_ids: dict = {}
+        self.download_error_messages: dict = {}
 
     def skip_msg_id(self, msg_id: int):
         """Skip if message id out of range"""
@@ -401,6 +403,10 @@ class Application:
         self.web_port: int = 5000
         self.max_download_task: int = 5
         self.single_file_download_workers: int = 1
+        self.max_total_download_workers: int = 6
+        self.download_worker_semaphore = asyncio.Semaphore(
+            self.max_total_download_workers
+        )
         self.language = Language.EN
         self.after_upload_telegram_delete: bool = True
         self.web_login_secret: str = ""
@@ -516,8 +522,21 @@ class Application:
             ),
         )
 
-        self.max_concurrent_transmissions = self.max_download_task * max(
-            5, self.single_file_download_workers
+        self.max_total_download_workers = max(
+            1,
+            get_config(
+                _config,
+                "max_total_download_workers",
+                max(self.max_download_task, self.single_file_download_workers),
+                int,
+            ),
+        )
+        self.download_worker_semaphore = asyncio.Semaphore(
+            self.max_total_download_workers
+        )
+
+        self.max_concurrent_transmissions = max(
+            self.max_download_task, self.max_total_download_workers
         )
 
         self.max_concurrent_transmissions = _config.get(
