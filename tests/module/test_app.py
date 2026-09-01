@@ -70,11 +70,13 @@ class AppTestCase(unittest.TestCase):
                 "file_formats": {},
                 "max_download_task": 2,
                 "single_file_download_workers": 6,
+                "max_total_download_workers": 6,
             }
         )
 
         self.assertEqual(6, app.single_file_download_workers)
-        self.assertEqual(12, app.max_concurrent_transmissions)
+        self.assertEqual(6, app.max_total_download_workers)
+        self.assertEqual(6, app.max_concurrent_transmissions)
 
     def test_single_file_download_workers_defaults_to_one(self):
         app = Application("", "")
@@ -88,7 +90,8 @@ class AppTestCase(unittest.TestCase):
         )
 
         self.assertEqual(1, app.single_file_download_workers)
-        self.assertEqual(25, app.max_concurrent_transmissions)
+        self.assertEqual(5, app.max_total_download_workers)
+        self.assertEqual(5, app.max_concurrent_transmissions)
 
     @mock.patch("__main__.__builtins__.open", new_callable=mock.mock_open)
     @mock.patch("module.app.yaml", autospec=True)

@@ -184,6 +184,8 @@ file_name_prefix:
 - file_name
 file_name_prefix_split: ' - '
 max_download_task: 5
+single_file_download_workers: 3
+max_total_download_workers: 6
 web_host: 127.0.0.1
 web_port: 5000
 web_login_secret: 123
@@ -223,6 +225,8 @@ enable_download_txt: false
   - `caption` - 消息的标题（可能为空）
 - **file_name_prefix_split** - 自定义文件名称分割符号，默认为` - `
 - **max_download_task** - 最大任务下载任务个数，默认为5个。
+- **single_file_download_workers** - 单个文件最多使用的下载分片数，默认为1。
+- **max_total_download_workers** - 所有文件合计允许的活跃下载分片数，默认为单文件分片数与最大下载任务数中的较大值；建议设置为6到8，避免并发请求过多。
 - **hide_file_name** - 是否隐藏web界面文件名称，默认`false`
 - **web_host** - web界面地址
 - **web_port** - web界面端口

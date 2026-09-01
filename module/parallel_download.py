@@ -12,8 +12,58 @@ from pyrogram.file_id import FileId
 
 from module.app import TaskNode
 from module.download_stat import update_download_status
+from module.language import _t
+from utils.format import format_byte
 
 CHUNK_SIZE = 1024 * 1024
+
+
+class ParallelDownloadError(Exception):
+    """Base error for a ranged download that can be shown to the user."""
+
+    code = "PARALLEL_DOWNLOAD_ERROR"
+
+    def user_message(self, global_worker_limit: int) -> str:
+        """Return a concise user-facing diagnostic."""
+        del global_worker_limit
+        return f"[{self.code}] {self}"
+
+
+class IncompletePartError(ParallelDownloadError):
+    """A worker stopped before its assigned range was fully downloaded."""
+
+    code = "INCOMPLETE_PART"
+
+    def __init__(
+        self,
+        worker_id: int,
+        actual_size: int,
+        expected_size: int,
+        worker_count: int,
+    ):
+        super().__init__(worker_id, actual_size, expected_size, worker_count)
+        self.worker_id = worker_id
+        self.actual_size = actual_size
+        self.expected_size = expected_size
+        self.worker_count = worker_count
+
+    def __str__(self) -> str:
+        return (
+            f"worker={self.worker_id}, actual={self.actual_size}, "
+            f"expected={self.expected_size}, workers={self.worker_count}"
+        )
+
+    def user_message(self, global_worker_limit: int) -> str:
+        return (
+            f"[{self.code}] {_t('Shard download ended early')}\n"
+            f"{_t('Shard')}: {self.worker_id}\n"
+            f"{_t('actual')}: {format_byte(self.actual_size)} / "
+            f"{_t('Expected')}: {format_byte(self.expected_size)}\n"
+            f"{_t('Worker count')}: {self.worker_count} / "
+            f"{_t('Global worker limit')}: {global_worker_limit}\n"
+            f"{_t('Possible cause')}: "
+            f"{_t('Telegram connection was reset or shard concurrency may be too high')}"
+        )
 
 
 @dataclass(frozen=True)
@@ -104,22 +154,28 @@ async def _download_part(
     part: DownloadPart,
     part_path: str,
     progress: ParallelDownloadProgress,
+    worker_semaphore: asyncio.Semaphore,
 ):
     """Download one part and validate its byte count."""
-    with open(part_path, "wb") as part_file:
-        async for chunk in client.get_file(
-            file_id,
-            file_size,
-            part.limit,
-            part.offset,
-            progress.update,
-            (part.worker_id,),
-        ):
-            part_file.write(chunk)
+    async with worker_semaphore:
+        with open(part_path, "wb") as part_file:
+            async for chunk in client.get_file(
+                file_id,
+                file_size,
+                part.limit,
+                part.offset,
+                progress.update,
+                (part.worker_id,),
+            ):
+                part_file.write(chunk)
 
-    if os.path.getsize(part_path) != part.size:
-        raise pyrogram.errors.exceptions.bad_request_400.BadRequest(
-            f"Worker {part.worker_id} downloaded an incomplete file range"
+    actual_size = os.path.getsize(part_path)
+    if actual_size != part.size:
+        raise IncompletePartError(
+            part.worker_id,
+            actual_size,
+            part.size,
+            len(progress.parts),
         )
 
 
@@ -134,9 +190,12 @@ async def download_media_in_parts(
     ui_file_name: str,
     start_time: float,
     node: TaskNode,
+    worker_semaphore: asyncio.Semaphore = None,
 ) -> Optional[str]:
     """Download media concurrently and merge its ordered part files."""
     parts = build_download_parts(file_size, worker_count)
+    if worker_semaphore is None:
+        worker_semaphore = asyncio.Semaphore(max(len(parts), 1))
     if len(parts) <= 1:
         download_result = await client.download_media(
             media,
@@ -163,7 +222,13 @@ async def download_media_in_parts(
     tasks = [
         asyncio.create_task(
             _download_part(
-                client, FileId.decode(media.file_id), file_size, part, path, progress
+                client,
+                FileId.decode(media.file_id),
+                file_size,
+                part,
+                path,
+                progress,
+                worker_semaphore,
             )
         )
         for part, path in zip(parts, part_paths)
@@ -187,9 +252,11 @@ async def download_media_in_parts(
         raise
     except pyrogram.errors.exceptions.flood_420.FloodWait:
         raise
+    except ParallelDownloadError:
+        raise
     except Exception as error:  # pylint: disable = W0703
         logger.exception(f"parallel media download failed: {error}")
-        return None
+        raise ParallelDownloadError(f"{type(error).__name__}: {error}") from error
     finally:
         for task in tasks:
             if not task.done():

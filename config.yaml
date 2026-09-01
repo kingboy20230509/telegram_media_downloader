@@ -21,5 +21,6 @@ media_types:
 - voice
 - video_note
 single_file_download_workers: 1
+max_total_download_workers: 6
 # in linux please use /
 # save_path: E:\github\telegram_media_downloader

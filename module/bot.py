@@ -93,12 +93,7 @@ class DownloadBot:
         """Get the shared progress node for directly forwarded media."""
         async with self.direct_download_lock:
             node = self.direct_download_nodes.get(from_user_id)
-            if node:
-                try:
-                    await self.bot.delete_messages(from_user_id, node.reply_message_id)
-                except Exception as e:
-                    logger.debug(f"delete direct download progress error: {e}")
-            else:
+            if not node:
                 node = TaskNode(
                     chat_id=chat_id,
                     from_user_id=from_user_id,
@@ -109,12 +104,21 @@ class DownloadBot:
                 self.add_task_node(node)
                 self.direct_download_nodes[from_user_id] = node
 
-            progress_message = await self.bot.send_message(
-                from_user_id, f"📥 {_t('Downloading')}..."
-            )
-            node.reply_message_id = progress_message.id
-            node.last_edit_msg = ""
-            node.is_running = False
+            async with node.progress_message_lock:
+                old_reply_message_id = node.reply_message_id
+                progress_message = await self.bot.send_message(
+                    from_user_id, f"📥 {_t('Downloading')}..."
+                )
+                node.reply_message_id = progress_message.id
+                node.last_edit_msg = ""
+                node.is_running = False
+                if old_reply_message_id:
+                    try:
+                        await self.bot.delete_messages(
+                            from_user_id, old_reply_message_id
+                        )
+                    except Exception as e:
+                        logger.debug(f"delete direct download progress error: {e}")
             return node
 
     async def remove_finished_direct_download_node(self, node: TaskNode):
@@ -132,10 +136,14 @@ class DownloadBot:
                 or not node.is_finish()
             ):
                 return False
-            try:
-                await self.bot.delete_messages(from_user_id, node.reply_message_id)
-            except Exception as e:
-                logger.debug(f"delete finished direct download progress error: {e}")
+            async with node.progress_message_lock:
+                reply_message_id = node.reply_message_id
+                node.reply_message_id = 0
+                try:
+                    if reply_message_id:
+                        await self.bot.delete_messages(from_user_id, reply_message_id)
+                except Exception as e:
+                    logger.debug(f"delete finished direct download progress error: {e}")
             self.direct_download_nodes.pop(from_user_id, None)
             return True
 

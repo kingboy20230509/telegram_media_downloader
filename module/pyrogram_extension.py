@@ -653,7 +653,9 @@ async def process_caption(
     return truncated_caption
 
 
-def convert_message_entity(client, entity: "pyrogram.raw.base.MessageEntity") -> Optional["pyrogram.types.MessageEntity"]:
+def convert_message_entity(
+    client, entity: "pyrogram.raw.base.MessageEntity"
+) -> Optional["pyrogram.types.MessageEntity"]:
     # Special case for InputMessageEntityMentionName -> MessageEntityType.TEXT_MENTION
     # This happens in case of UpdateShortSentMessage inside send_message() where entities are parsed from the input
     if isinstance(entity, pyrogram.raw.types.InputMessageEntityMentionName):
@@ -672,8 +674,9 @@ def convert_message_entity(client, entity: "pyrogram.raw.base.MessageEntity") ->
         language=getattr(entity, "language", None),
         custom_emoji_id=getattr(entity, "document_id", None),
         expandable=getattr(entity, "collapsed", None),
-        client=client
+        client=client,
     )
+
 
 def convert_entities(
     entities: List[pyrogram.raw.base.MessageEntity],
@@ -683,9 +686,7 @@ def convert_entities(
         return []
 
     try:
-        return [
-            convert_message_entity(None, entity) for entity in entities
-        ]
+        return [convert_message_entity(None, entity) for entity in entities]
     except Exception as e:
         logger.warning(f"Failed to convert entities: {e}")
         return []
@@ -1027,18 +1028,27 @@ async def report_bot_download_status(
     node.total_download_byte += download_size
 
     direct_reply_message_id = node.direct_download_reply_ids.pop(message_id, None)
-    if (
-        direct_reply_message_id
-        and download_status is DownloadStatus.SuccessDownload
-    ):
-        try:
-            await client.edit_message_text(
-                node.from_user_id,
-                direct_reply_message_id,
-                _t("Completed"),
+    if direct_reply_message_id:
+        reply_text = None
+        if download_status is DownloadStatus.SuccessDownload:
+            reply_text = _t("Completed")
+        elif download_status is DownloadStatus.FailedDownload:
+            error_message = node.download_error_messages.get(
+                message_id, _t("Unknown download error")
             )
+            reply_text = f"{_t('Failed')}\n{error_message}"
+        elif download_status is DownloadStatus.SkipDownload:
+            reply_text = _t("Skipped")
+
+        try:
+            if reply_text:
+                await client.edit_message_text(
+                    node.from_user_id,
+                    direct_reply_message_id,
+                    reply_text,
+                )
         except Exception as error:
-            logger.debug(f"edit direct download completion error: {error}")
+            logger.debug(f"edit direct download result error: {error}")
 
     await report_bot_status(client, node)
 
@@ -1093,6 +1103,7 @@ async def _report_bot_status(
     """
     if not node.reply_message_id or not node.bot:
         return
+    reply_message_id = node.reply_message_id
 
     if immediate_reply or node.can_reply():
         if node.upload_telegram_chat_id:
@@ -1172,8 +1183,7 @@ async def _report_bot_status(
                     )
 
                 download_detail_str += (
-                    f" │   └─ 📊 : [{create_progress_bar(progress)}]"
-                    f" ({progress}%)\n"
+                    f" │   └─ 📊 : [{create_progress_bar(progress)}]" f" ({progress}%)\n"
                 )
                 download_result_str += download_detail_str
 
@@ -1232,13 +1242,16 @@ async def _report_bot_status(
             )
 
         if new_msg_str != node.last_edit_msg:
-            node.last_edit_msg = new_msg_str
-            await client.edit_message_text(
-                node.from_user_id,
-                node.reply_message_id,
-                new_msg_str,
-                parse_mode=pyrogram.enums.ParseMode.MARKDOWN,
-            )
+            async with node.progress_message_lock:
+                if reply_message_id != node.reply_message_id:
+                    return
+                await client.edit_message_text(
+                    node.from_user_id,
+                    reply_message_id,
+                    new_msg_str,
+                    parse_mode=pyrogram.enums.ParseMode.MARKDOWN,
+                )
+                node.last_edit_msg = new_msg_str
 
 
 def set_max_concurrent_transmissions(

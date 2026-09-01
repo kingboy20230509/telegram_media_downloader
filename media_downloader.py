@@ -16,7 +16,7 @@ from module.bot import start_download_bot, stop_download_bot
 from module.download_stat import update_download_status
 from module.get_chat_history_v2 import get_chat_history_v2
 from module.language import _t
-from module.parallel_download import download_media_in_parts
+from module.parallel_download import ParallelDownloadError, download_media_in_parts
 from module.pyrogram_extension import (
     HookClient,
     fetch_message,
@@ -28,6 +28,7 @@ from module.pyrogram_extension import (
     update_cloud_upload_stat,
     upload_telegram_chat,
 )
+from module.session_guard import install_session_restart_guard
 from module.web import init_web
 from utils.format import truncate_filename, validate_title
 from utils.log import LogFilter
@@ -79,6 +80,24 @@ def _check_download_finish(media_size: int, download_path: str, ui_file_name: st
         )
         os.remove(download_path)
         raise pyrogram.errors.exceptions.bad_request_400.BadRequest()
+
+
+def _set_download_error(node: TaskNode, message_id: int, error_message: str):
+    """Store a diagnostic that can be shown in the corresponding bot reply."""
+    node.download_error_messages[message_id] = error_message
+    logger.error(f"Message[{message_id}] download failed: {error_message}")
+
+
+def _format_download_exception(error: Exception) -> str:
+    """Classify common transport failures while preserving the raw exception."""
+    win_error = getattr(error, "winerror", None)
+    if win_error in {10053, 10054}:
+        code = "CONNECTION_RESET"
+    elif "another coroutine is already waiting" in str(error):
+        code = "SESSION_RESTART_CONFLICT"
+    else:
+        code = type(error).__name__.upper()
+    return f"[{code}] {type(error).__name__}: {error}"
 
 
 def _move_to_download_path(temp_download_path: str, download_path: str):
@@ -397,6 +416,7 @@ async def download_media(
     task_start_time: float = time.time()
     media_size = 0
     _media = None
+    _type = ""
     message = await fetch_message(client, message)
     try:
         for _type in media_types:
@@ -437,6 +457,7 @@ async def download_media(
         return DownloadStatus.SkipDownload, None
 
     message_id = message.id
+    node.download_error_messages.pop(message_id, None)
 
     for retry in range(3):
         try:
@@ -451,6 +472,7 @@ async def download_media(
                     ui_file_name,
                     task_start_time,
                     node,
+                    app.download_worker_semaphore,
                 )
             else:
                 temp_download_path = await client.download_media(
@@ -471,13 +493,48 @@ async def download_media(
                 await asyncio.sleep(0.5)
                 _move_to_download_path(temp_download_path, file_name)
                 # TODO: if not exist file size or media
+                node.download_error_messages.pop(message_id, None)
                 return DownloadStatus.SuccessDownload, file_name
-        except pyrogram.errors.exceptions.bad_request_400.BadRequest:
+        except ParallelDownloadError as error:
+            error_message = error.user_message(app.max_total_download_workers)
+            _set_download_error(node, message_id, error_message)
+            await asyncio.sleep(RETRY_TIME_OUT)
+            try:
+                message = await fetch_message(client, message)
+            except Exception as refresh_error:
+                _set_download_error(
+                    node,
+                    message_id,
+                    f"[MESSAGE_REFRESH_FAILED] "
+                    f"{type(refresh_error).__name__}: {refresh_error}",
+                )
+                break
+            _media = getattr(message, _type, None)
+            if _check_timeout(retry, message.id):
+                logger.error(
+                    f"Message[{message.id}] ranged download failed after 3 retries: "
+                    f"{error}"
+                )
+        except pyrogram.errors.exceptions.bad_request_400.BadRequest as error:
+            _set_download_error(
+                node,
+                message_id,
+                f"[FILE_REFERENCE_EXPIRED] {type(error).__name__}: {error}",
+            )
             logger.warning(
                 f"Message[{message.id}]: {_t('file reference expired, refetching')}..."
             )
             await asyncio.sleep(RETRY_TIME_OUT)
-            message = await fetch_message(client, message)
+            try:
+                message = await fetch_message(client, message)
+            except Exception as refresh_error:
+                _set_download_error(
+                    node,
+                    message_id,
+                    f"[MESSAGE_REFRESH_FAILED] "
+                    f"{type(refresh_error).__name__}: {refresh_error}",
+                )
+                break
             _media = getattr(message, _type, None)
             if _check_timeout(retry, message.id):
                 # pylint: disable = C0301
@@ -486,10 +543,20 @@ async def download_media(
                     f"{_t('file reference expired for 3 retries, download skipped.')}"
                 )
         except pyrogram.errors.exceptions.flood_420.FloodWait as wait_err:
+            _set_download_error(
+                node,
+                message_id,
+                f"[FLOOD_WAIT] Telegram requested a {wait_err.value}s delay",
+            )
             await asyncio.sleep(wait_err.value)
             logger.warning("Message[{}]: FlowWait {}", message.id, wait_err.value)
             _check_timeout(retry, message.id)
-        except TypeError:
+        except TypeError as error:
+            _set_download_error(
+                node,
+                message_id,
+                f"[DOWNLOAD_TIMEOUT] {type(error).__name__}: {error}",
+            )
             # pylint: disable = C0301
             logger.warning(
                 f"{_t('Timeout Error occurred when downloading Message')}[{message.id}], "
@@ -501,6 +568,7 @@ async def download_media(
                     f"Message[{message.id}]: {_t('Timing out after 3 reties, download skipped.')}"
                 )
         except Exception as e:
+            _set_download_error(node, message_id, _format_download_exception(e))
             # pylint: disable = C0301
             logger.error(
                 f"Message[{message.id}]: "
@@ -509,6 +577,10 @@ async def download_media(
             )
             break
 
+    if message_id not in node.download_error_messages:
+        _set_download_error(
+            node, message_id, f"[UNKNOWN] {_t('Unknown download error')}"
+        )
     return DownloadStatus.FailedDownload, None
 
 
@@ -665,6 +737,7 @@ async def stop_server(client: pyrogram.Client):
 def main():
     """Main function of the downloader."""
     tasks = []
+    install_session_restart_guard()
     client = HookClient(
         "media_downloader",
         api_id=app.api_id,
