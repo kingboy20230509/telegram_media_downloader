@@ -1,5 +1,6 @@
 """Tests for the download bot."""
 
+import asyncio
 import unittest
 from types import SimpleNamespace
 from unittest import mock
@@ -62,11 +63,18 @@ class DirectDownloadProgressTestCase(unittest.IsolatedAsyncioTestCase):
 
     async def test_new_download_recreates_shared_progress_at_bottom(self):
         bot = DownloadBot()
+        events = []
+
+        async def send_message(*_args, **_kwargs):
+            events.append("send")
+            return SimpleNamespace(id=100 + events.count("send"))
+
+        async def delete_messages(*_args, **_kwargs):
+            events.append("delete")
+
         bot.bot = SimpleNamespace(
-            send_message=AsyncMock(
-                side_effect=[SimpleNamespace(id=101), SimpleNamespace(id=102)]
-            ),
-            delete_messages=AsyncMock(),
+            send_message=AsyncMock(side_effect=send_message),
+            delete_messages=AsyncMock(side_effect=delete_messages),
         )
 
         first_node = await bot.get_direct_download_node(1, 99)
@@ -77,7 +85,33 @@ class DirectDownloadProgressTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second_node.reply_message_id, 102)
         self.assertFalse(second_node.is_running)
         bot.bot.delete_messages.assert_awaited_once_with(99, 101)
+        self.assertEqual(["send", "send", "delete"], events)
         self.assertEqual(len(bot.task_node), 1)
+
+    @mock.patch("module.pyrogram_extension.get_download_result", return_value={})
+    async def test_stale_progress_update_does_not_edit_deleted_message(
+        self, _mock_download_result
+    ):
+        client = SimpleNamespace(edit_message_text=AsyncMock())
+        node = TaskNode(
+            chat_id=99,
+            from_user_id=99,
+            reply_message_id=101,
+            bot=object(),
+            task_id=1,
+        )
+        node.is_direct_download = True
+        await node.progress_message_lock.acquire()
+
+        report_task = asyncio.create_task(
+            _report_bot_status(client, node, immediate_reply=True)
+        )
+        await asyncio.sleep(0)
+        node.reply_message_id = 102
+        node.progress_message_lock.release()
+        await report_task
+
+        client.edit_message_text.assert_not_awaited()
 
     @mock.patch("module.bot._bot")
     async def test_direct_download_tracks_the_corresponding_reply(
@@ -113,6 +147,28 @@ class DirectDownloadProgressTestCase(unittest.IsolatedAsyncioTestCase):
 
         client.edit_message_text.assert_awaited_once_with(99, 201, "完成")
         self.assertNotIn(8224, node.direct_download_reply_ids)
+
+    @mock.patch("module.pyrogram_extension._t", side_effect=lambda text: text)
+    async def test_failed_download_replaces_direct_reply_with_diagnostic(
+        self, _mock_translate
+    ):
+        client = SimpleNamespace(edit_message_text=AsyncMock())
+        node = TaskNode(chat_id=99, from_user_id=99, task_id=1)
+        node.direct_download_reply_ids[8224] = 201
+        node.download_error_messages[8224] = "[INCOMPLETE_PART] worker=3, workers=6"
+
+        await report_bot_download_status(
+            client,
+            node,
+            DownloadStatus.FailedDownload,
+            message_id=8224,
+        )
+
+        client.edit_message_text.assert_awaited_once_with(
+            99,
+            201,
+            "Failed\n[INCOMPLETE_PART] worker=3, workers=6",
+        )
 
     async def test_finished_download_removes_progress_and_shared_node(self):
         bot = DownloadBot()
