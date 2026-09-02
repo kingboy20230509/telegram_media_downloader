@@ -954,12 +954,6 @@ async def download_forward_media(
         await direct_download(_bot, message.from_user.id, message, message, client)
         return
 
-    await client.send_message(
-        message.from_user.id,
-        _t("Skipped"),
-        reply_to_message_id=message.id,
-    )
-
 
 async def download_from_link(client: pyrogram.Client, message: pyrogram.types.Message):
     """
