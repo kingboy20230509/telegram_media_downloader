@@ -66,11 +66,8 @@ class DownloadBotTestCase(unittest.TestCase):
 class DirectDownloadProgressTestCase(unittest.IsolatedAsyncioTestCase):
     """Test aggregated progress messages for directly forwarded media."""
 
-    @mock.patch("module.bot._t", return_value="跳过")
     @mock.patch("module.bot._bot")
-    async def test_disabled_forward_replies_with_skipped(
-        self, mock_bot, _mock_translate
-    ):
+    async def test_disabled_forward_is_ignored(self, mock_bot):
         mock_bot.app = SimpleNamespace(
             media_types=["video"], file_formats={"video": ["all"]}
         )
@@ -84,11 +81,7 @@ class DirectDownloadProgressTestCase(unittest.IsolatedAsyncioTestCase):
 
         await download_forward_media(client, message)
 
-        client.send_message.assert_awaited_once_with(
-            99,
-            "跳过",
-            reply_to_message_id=8224,
-        )
+        client.send_message.assert_not_awaited()
         mock_bot.add_download_task.assert_not_called()
 
     async def test_new_download_recreates_shared_progress_at_bottom(self):
